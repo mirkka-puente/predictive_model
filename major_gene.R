@@ -1,12 +1,11 @@
 # Instalar paquetes
-install.packages("readxl")
-install.packages("tidyverse")
-install.packages("writexl")
+#install.packages("readxl")
+#install.packages("tidyverse")
 
 # Cargar librerías
 library(readxl)
 library(tidyverse)
-library(writexl)
+library(dplyr)
 
 #--------------------------------------------------
 # 1. Leer archivo Excel
@@ -80,5 +79,10 @@ hpi <- c(
   12   # Sample_24
 )
 dt$hour <- hpi
+
+# Eliminar los mock
+gene_set <- dt %>% filter(tratamiento != "mock")
+
+
 
 
