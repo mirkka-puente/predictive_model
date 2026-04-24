@@ -2,6 +2,7 @@
 install.packages("readxl")
 install.packages("tidyverse")
 install.packages("writexl")
+install.packages("tidyverse")
 
 # Cargar librerías
 library(readxl)
@@ -80,5 +81,9 @@ hpi <- c(
   12   # Sample_24
 )
 dt$hour <- hpi
+
+# Remover las filas mock
+gene_set 
+
 
 
