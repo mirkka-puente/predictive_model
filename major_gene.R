@@ -8,22 +8,15 @@ library(tidyverse)
 library(dplyr)
 
 #--------------------------------------------------
-# 1. Leer archivo Excel
+# 1. Leer archivo 
 #--------------------------------------------------
-archivo <- "S3_FPKM.xlsx"
+archivo <- read.csv("S3_FPKM.csv", row.names = 1, check.names = FALSE)
+head(archivo)
+str(archivo)
 
-# Ver hojas disponibles
-excel_sheets(archivo)
-
-# Leer hoja específica
-dataset <- read_excel(archivo, sheet = "IQ.OWLS Genes")
-dt <- as.data.frame(t(dataset))
-colnames(dt) <- as.character(dt[1, ])
-dt <- dt[-c(1,20,21),]
-
-
-# Ver primeras filas
-head(dt)
+# Cambio de columnas y filas
+archivo <- archivo[,-c(19,20)]
+dt <- as.data.frame(t(archivo))
 
 # Revisar estructura
 str(dt)
@@ -82,6 +75,25 @@ dt$hour <- hpi
 
 # Eliminar los mock
 gene_set <- dt %>% filter(tratamiento != "mock")
+
+# Dividir mi data en numerica y no numerica
+treatment_hours <- gene_set[, c("tratamiento", "hour")]
+gene_set_num <- gene_set[, !(colnames(gene_set) %in% c("tratamiento", "hour"))]
+
+
+#--------------------------------------------------
+# 2. Curacion de Data 
+#--------------------------------------------------
+# Hay algun NA en el dataset?
+any(is.na(gene_set_num))
+
+# Eliminar las columnas con cero expresion genica
+keep <- colSums(gene_set_num > 0) > 0
+gene_set_filtered <- gene_set_num[, keep]
+
+
+# Transformacion logaritmica
+gene_set_log <- log2(gene_set_filtered + 1)
 
 
 
