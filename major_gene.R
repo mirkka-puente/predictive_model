@@ -124,5 +124,50 @@ ggplot(pca_df, aes(x = PC1, y = PC2, color = tratamiento, shape = hour)) +
     color = "Treatment",
     shape = "hpi"
   ) +
-  theme_classic(base_size = 13)
+  theme_classic(base_size = 10)
+
+#--------------------------------------------------
+# 4. Exploracion de datos
+#--------------------------------------------------
+#install.packages("pheatmap")
+library(pheatmap)
+
+# Top 500 most variable genes
+gene_var <- apply(gene_set_log, 2, var)
+top500 <- names(sort(gene_var, decreasing = TRUE)[1:500])
+mat <- t(gene_set_log[, top500])  # genes deben ser filas
+
+# Anotacion para el top del heatmap
+annotation_col <- data.frame(
+  Treatment = treatment_hours$tratamiento,
+  hpi       = factor(treatment_hours$hour)
+)
+rownames(annotation_col) <- rownames(gene_set_log)
+
+# Colors for annotation
+ann_colors <- list(
+  Treatment = c(avr = "#5DCAA5", vir = "#D85A30"),
+  hpi       = c("1" = "#EEEDFE", "6" = "#7F77DD", "12" = "#3C3489")
+)
+
+# Plot
+pheatmap(
+  mat,
+  annotation_col    = annotation_col,
+  annotation_colors = ann_colors,
+  show_rownames     = FALSE,
+  show_colnames     = TRUE,
+  scale             = "row",
+  clustering_distance_rows = "euclidean",
+  clustering_distance_cols = "euclidean",
+  clustering_method        = "complete",
+  color             = colorRampPalette(c("#185FA5", "white", "#D85A30"))(100),
+  fontsize_col      = 9,
+  border_color      = NA,
+  main              = "Top 500 variable genes — avr vs vir",
+  legend_breaks     = c(-2, -1, 0, 1, 2),
+  legend_labels     = c("Row Z-score \n -2", "-1", "0", "1", "2")
+)
+
+
 
