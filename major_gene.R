@@ -95,5 +95,34 @@ gene_set_filtered <- gene_set_num[, keep]
 # Transformacion logaritmica
 gene_set_log <- log2(gene_set_filtered + 1)
 
+#--------------------------------------------------
+# 3. PCA
+#--------------------------------------------------
 
+library(ggplot2)
+
+# PCA
+pca <- prcomp(gene_set_log, scale. = TRUE)
+
+# Armar dataframe con resultados + metadatos
+pca_df <- data.frame(
+  PC1 = pca$x[, 1],
+  PC2 = pca$x[, 2],
+  tratamiento = treatment_hours$tratamiento,
+  hour        = factor(treatment_hours$hour)
+)
+
+# Varianza explicada
+var_exp <- summary(pca)$importance[2, ] * 100
+
+# Plot components
+ggplot(pca_df, aes(x = PC1, y = PC2, color = tratamiento, shape = hour)) +
+  geom_point(size = 4, alpha = 0.85) +
+  labs(
+    x     = paste0("PC1 (", round(var_exp[1], 1), "%)"),
+    y     = paste0("PC2 (", round(var_exp[2], 1), "%)"),
+    color = "Treatment",
+    shape = "hpi"
+  ) +
+  theme_classic(base_size = 13)
 
