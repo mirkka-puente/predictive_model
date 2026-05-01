@@ -169,5 +169,73 @@ pheatmap(
   legend_labels     = c("Row Z-score \n -2", "-1", "0", "1", "2")
 )
 
+#--------------------------------------------------
+# 5. Limma model 
+#--------------------------------------------------
+#install.packages("BiocManager")
+BiocManager::install("limma")
+library(limma)
 
+# Cambiar las hhoras a factores
+treatment_hours$hour <- factor(treatment_hours$hour, levels = c("1", "6", "12"))
+
+# Matrix
+design <- model.matrix(~ tratamiento * hour, data = treatment_hours)
+colnames(design)
+
+# Modelo Limma 
+fit <- limma::lmFit(t(gene_set_log), design)
+fit <- limma::eBayes(fit)
+
+# --- Comparacion entre tratamientos ---
+
+# 1. avr vs vir (sin tiempo)
+res_overall <- topTable(fit, coef = "tratamientovir", 
+                        number = Inf, adjust.method = "BH")
+
+# 2. Interaccion: does avr/vir difference change at 6 hpi vs 1 hpi?
+res_int6  <- topTable(fit, coef = "tratamientovir:hour6",  
+                      number = Inf, adjust.method = "BH")
+
+# 3. Interaction: does avr/vir difference change at 12 hpi vs 1 hpi?
+res_int12 <- topTable(fit, coef = "tratamientovir:hour12", 
+                      number = Inf, adjust.method = "BH")
+
+# --- Filter significant genes (adj.P < 0.05, |logFC| > 1) ---
+sig_overall <- res_overall[res_overall$adj.P.Val < 0.05 & abs(res_overall$logFC) > 1, ]
+sig_int6    <- res_int6[res_int6$adj.P.Val < 0.05 & abs(res_int6$logFC) > 1, ]
+sig_int12   <- res_int12[res_int12$adj.P.Val < 0.05 & abs(res_int12$logFC) > 1, ]
+
+# Quick summary
+cat("Overall DE genes:", nrow(sig_overall), "\n")
+cat("Interaction at 6 hpi:", nrow(sig_int6), "\n")
+cat("Interaction at 12 hpi:", nrow(sig_int12), "\n")
+
+# --- DIAGNOSIS ---
+
+# 1. How many genes pass BEFORE the logFC filter?
+sig_ponly <- res_overall[res_overall$adj.P.Val < 0.05, ]
+cat("Genes with adj.P < 0.05 (no logFC filter):", nrow(sig_ponly), "\n")
+
+# 2. What if you relax to raw p-value?
+sig_raw <- res_overall[res_overall$P.Value < 0.05, ]
+cat("Genes with raw P < 0.05:", nrow(sig_raw), "\n")
+
+# 3. What does the p-value distribution look like?
+hist(res_overall$P.Value, breaks = 50, 
+     main = "P-value distribution", xlab = "P-value",
+     col = "#7F77DD")
+# A good experiment shows enrichment near 0 (left spike)
+# A flat/uniform histogram = no signal or model problem
+
+# 4. Check your design matrix — does it look right?
+print(design)
+# You should see 18 rows, columns for tratamientovir, hour6, hour12, interactions
+
+# 5. Check sample sizes per group
+table(treatment_hours$tratamiento, treatment_hours$hour)
+
+# How many degrees of freedom does your model have?
+fit$df.residual
+# If you see values of 6 or less — that's your problem
 
