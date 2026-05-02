@@ -97,46 +97,67 @@ gene_set_log <- log2(gene_set_filtered + 1)
 
 
 #--------------------------------------------------
-# 3. Sanity check — labels match rows
+# 3. Chequeo — numero de columnas
 #--------------------------------------------------
-cat("Samples in expression matrix:", nrow(gene_set_log), "\n")
-cat("Samples in treatment vector: ", length(treatment_col), "\n")
-cat("Labels:", treatment_col, "\n")
+cat("Numero de muestras:", nrow(gene_set_log), "\n")
+cat("Columnas en tratamientos y horas: ", length(treatment_hours), "\n")
 
 #--------------------------------------------------
-# 4. limma — simple avr vs vir
+# 4. limma — avr vs vir
 #--------------------------------------------------
-install.packages("BiocManager")
+#install.packages("BiocManager")
+#BiocManager::install("limma")
 library(limma)
-# Design matrix (avr is the reference/intercept)
-treatment_factor <- factor(treatment_col, levels = c("avr", "vir"))
-design           <- model.matrix(~ treatment_factor)
+
+
+# El "bloque" es el experimento biológico repetido en el tiempo
+# Tienes 2 réplicas biológicas × 3 tiempos × 2 tratamientos = 12 muestras
+# Las réplicas biológicas son el bloque
+
+bloque <- factor(c(
+  1, 1,   # avr/vir rep1 - 1hpi
+  1, 1,   # avr/vir rep1 - 6hpi
+  1, 1,   # avr/vir rep1 - 12hpi
+  2, 2,   # avr/vir rep2 - 1hpi
+  2, 2,   # avr/vir rep2 - 6hpi
+  2, 2    # avr/vir rep2 - 12hpi
+))
+
+# Diseño simple avr vs vir
+treatment_factor <- factor(treatment_hours$tratamiento, levels = c("avr", "vir"))
+design <- model.matrix(~ treatment_factor)
 colnames(design) <- c("Intercept", "vir_vs_avr")
 
-print(design)  # confirm: 12 rows, 2 columns
+print(design)
 
-# Fit
-fit  <- lmFit(t(gene_set_log), design)   # genes as rows
-fit  <- eBayes(fit)
+# Paso 1: estimar correlación entre réplicas del mismo bloque
+corfit <- duplicateCorrelation(t(gene_set_log), design, block = bloque)
+cat("Correlación entre bloques:", corfit$consensus.correlation, "\n")
+# Valor entre 0.1–0.9 = bien. Negativo o >0.99 = revisar bloques
 
-# Degrees of freedom check — should be ~10
-cat("Residual df:", fit$df.residual[1], "\n")
+# Paso 2: fit con correlación
+fit <- lmFit(t(gene_set_log), design,
+             block = bloque,
+             correlation = corfit$consensus.correlation)
+fit <- eBayes(fit)
 
-#--------------------------------------------------
-# 5. Extract results
-#--------------------------------------------------
+# Paso 3: resultados
 res <- topTable(fit, coef = "vir_vs_avr",
                 number = Inf, adjust.method = "BH")
 
-# P-value distribution — should show left spike now
-hist(res$P.Value, breaks = 50,
-     main = "P-value distribution (avr vs vir)",
-     xlab = "P-value", col = "#5DCAA5")
+# Verificar que adj.P.Val ya no está clavado
+print(head(res[order(res$P.Value), 
+               c("logFC", "AveExpr", "P.Value", "adj.P.Val")], 10))
 
-# Filter significant genes
+# Histograma — ahora debe tener spike cerca de 0
+hist(res$P.Value, breaks = 50, col = "#5DCAA5",
+     main = "P-values con duplicateCorrelation",
+     xlab = "P-value")
+
+# Filtrar genes DE
 sig <- res[res$adj.P.Val < 0.05 & abs(res$logFC) > 1, ]
+cat("Genes DE totales:  ", nrow(sig), "\n")
+cat("Más altos en vir:  ", nrow(sig[sig$logFC > 1,  ]), "\n")
+cat("Más altos en avr:  ", nrow(sig[sig$logFC < -1, ]), "\n")
 
-cat("Total DE genes:    ", nrow(sig), "\n")
-cat("Higher in vir:     ", nrow(sig[sig$logFC > 1, ]), "\n")
-cat("Higher in avr:     ", nrow(sig[sig$logFC < -1, ]), "\n")
 
