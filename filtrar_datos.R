@@ -157,34 +157,55 @@ pheatmap(
 #==================================================
 # PASO 3 — LIMMA
 #==================================================
-treatment_factor <- factor(treatment_hours$tratamiento, levels = c("avr", "vir"))
-design <- model.matrix(~ treatment_factor)
-colnames(design) <- c("Intercept", "vir_vs_avr")
+#--------------------------------------------------
+# FIX: modelo que controla por tiempo
+#--------------------------------------------------
 
-# Fit con trend=TRUE (recomendado para FPKM log-transformado)
+# hour es factor
+treatment_hours$hour <- factor(treatment_hours$hour, levels = c("1", "6", "12"))
+treatment_factor     <- factor(treatment_hours$tratamiento, levels = c("avr", "vir"))
+
+# Diseño aditivo: controla por hora, compara avr vs vir dentro de cada hora
+design <- model.matrix(~ hour + treatment_factor, data = treatment_hours)
+colnames(design)
+
+print(design)  # debe tener 12 filas, 4 columnas
+
+# Fit
 fit <- lmFit(t(gene_set_log), design)
 fit <- eBayes(fit, trend = TRUE)
 
-# Resultados
-res <- topTable(fit, coef = "vir_vs_avr",
+# Extraer SOLO el efecto de tratamiento (controlando por hora)
+res <- topTable(fit, coef = "treatment_factorvir",
                 number = Inf, adjust.method = "BH")
 
 # Diagnóstico
+par(mfrow = c(1, 2))
 hist(res$P.Value, breaks = 50, col = "#5DCAA5",
-     main = "Distribución de p-valores (avr vs vir)",
+     main = "P-values (modelo con hora)",
      xlab = "P-value")
+hist(res$logFC, breaks = 50, col = "#7F77DD",
+     main = "logFC distribution",
+     xlab = "logFC")
+par(mfrow = c(1, 1))
 
-# Top 10 genes
-cat("\n=== TOP 10 GENES ===\n")
-print(head(res[order(res$P.Value),
-               c("logFC", "AveExpr", "P.Value", "adj.P.Val")], 10))
+#--------------------------------------------------
+# RESULTADOS FINALES — umbral ajustado para n pequeño
+#--------------------------------------------------
 
-# Filtrar genes DE
-sig <- res[res$adj.P.Val < 0.05 & abs(res$logFC) > 1, ]
+# P.Value < 0.05 sin corrección (exploratorio)
+sig_raw <- res[res$P.Value < 0.05 & abs(res$logFC) > 1, ]
+cat("Genes con raw P < 0.05 y |logFC| > 1: ", nrow(sig_raw), "\n")
 
-cat("\n=== RESULTADOS FINALES ===\n")
-cat("Genes DE totales: ", nrow(sig), "\n")
-cat("Más altos en vir: ", nrow(sig[sig$logFC > 1,  ]), "\n")
-cat("Más altos en avr: ", nrow(sig[sig$logFC < -1, ]), "\n")
+# Ver cuántos tienen logFC > 1 en cada caso
+cat("\n--- Con adj.P < 0.1 ---\n")
+cat("Más altos en vir: ", nrow(sig_fdr10[sig_fdr10$logFC > 1,  ]), "\n")
+cat("Más altos en avr: ", nrow(sig_fdr10[sig_fdr10$logFC < -1, ]), "\n")
+
+cat("\n--- Con raw P < 0.05 y |logFC| > 1 ---\n")
+cat("Más altos en vir: ", nrow(sig_raw[sig_raw$logFC > 1,  ]), "\n")
+cat("Más altos en avr: ", nrow(sig_raw[sig_raw$logFC < -1, ]), "\n")
+
+
 
 
