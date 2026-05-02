@@ -95,147 +95,48 @@ gene_set_filtered <- gene_set_num[, keep]
 # Transformacion logaritmica
 gene_set_log <- log2(gene_set_filtered + 1)
 
-#--------------------------------------------------
-# 3. PCA
-#--------------------------------------------------
-
-library(ggplot2)
-
-# PCA
-pca <- prcomp(gene_set_log, scale. = TRUE)
-
-# Armar dataframe con resultados + metadatos
-pca_df <- data.frame(
-  PC1 = pca$x[, 1],
-  PC2 = pca$x[, 2],
-  tratamiento = treatment_hours$tratamiento,
-  hour        = factor(treatment_hours$hour)
-)
-
-# Varianza explicada
-var_exp <- summary(pca)$importance[2, ] * 100
-
-# Plot components
-ggplot(pca_df, aes(x = PC1, y = PC2, color = tratamiento, shape = hour)) +
-  geom_point(size = 4, alpha = 0.85) +
-  labs(
-    x     = paste0("PC1 (", round(var_exp[1], 1), "%)"),
-    y     = paste0("PC2 (", round(var_exp[2], 1), "%)"),
-    color = "Treatment",
-    shape = "hpi"
-  ) +
-  theme_classic(base_size = 10)
 
 #--------------------------------------------------
-# 4. Exploracion de datos
+# 3. Sanity check — labels match rows
 #--------------------------------------------------
-#install.packages("pheatmap")
-library(pheatmap)
-
-# Top 500 most variable genes
-gene_var <- apply(gene_set_log, 2, var)
-top500 <- names(sort(gene_var, decreasing = TRUE)[1:500])
-mat <- t(gene_set_log[, top500])  # genes deben ser filas
-
-# Anotacion para el top del heatmap
-annotation_col <- data.frame(
-  Treatment = treatment_hours$tratamiento,
-  hpi       = factor(treatment_hours$hour)
-)
-rownames(annotation_col) <- rownames(gene_set_log)
-
-# Colors for annotation
-ann_colors <- list(
-  Treatment = c(avr = "#5DCAA5", vir = "#D85A30"),
-  hpi       = c("1" = "#EEEDFE", "6" = "#7F77DD", "12" = "#3C3489")
-)
-
-# Plot
-pheatmap(
-  mat,
-  annotation_col    = annotation_col,
-  annotation_colors = ann_colors,
-  show_rownames     = FALSE,
-  show_colnames     = TRUE,
-  scale             = "row",
-  clustering_distance_rows = "euclidean",
-  clustering_distance_cols = "euclidean",
-  clustering_method        = "complete",
-  color             = colorRampPalette(c("#185FA5", "white", "#D85A30"))(100),
-  fontsize_col      = 9,
-  border_color      = NA,
-  main              = "Top 500 variable genes — avr vs vir",
-  legend_breaks     = c(-2, -1, 0, 1, 2),
-  legend_labels     = c("Row Z-score \n -2", "-1", "0", "1", "2")
-)
+cat("Samples in expression matrix:", nrow(gene_set_log), "\n")
+cat("Samples in treatment vector: ", length(treatment_col), "\n")
+cat("Labels:", treatment_col, "\n")
 
 #--------------------------------------------------
-# 5. Limma model 
+# 4. limma — simple avr vs vir
 #--------------------------------------------------
-#install.packages("BiocManager")
-BiocManager::install("limma")
+install.packages("BiocManager")
 library(limma)
+# Design matrix (avr is the reference/intercept)
+treatment_factor <- factor(treatment_col, levels = c("avr", "vir"))
+design           <- model.matrix(~ treatment_factor)
+colnames(design) <- c("Intercept", "vir_vs_avr")
 
-# Cambiar las hhoras a factores
-treatment_hours$hour <- factor(treatment_hours$hour, levels = c("1", "6", "12"))
+print(design)  # confirm: 12 rows, 2 columns
 
-# Matrix
-design <- model.matrix(~ tratamiento * hour, data = treatment_hours)
-colnames(design)
+# Fit
+fit  <- lmFit(t(gene_set_log), design)   # genes as rows
+fit  <- eBayes(fit)
 
-# Modelo Limma 
-fit <- limma::lmFit(t(gene_set_log), design)
-fit <- limma::eBayes(fit)
+# Degrees of freedom check — should be ~10
+cat("Residual df:", fit$df.residual[1], "\n")
 
-# --- Comparacion entre tratamientos ---
+#--------------------------------------------------
+# 5. Extract results
+#--------------------------------------------------
+res <- topTable(fit, coef = "vir_vs_avr",
+                number = Inf, adjust.method = "BH")
 
-# 1. avr vs vir (sin tiempo)
-res_overall <- topTable(fit, coef = "tratamientovir", 
-                        number = Inf, adjust.method = "BH")
+# P-value distribution — should show left spike now
+hist(res$P.Value, breaks = 50,
+     main = "P-value distribution (avr vs vir)",
+     xlab = "P-value", col = "#5DCAA5")
 
-# 2. Interaccion: does avr/vir difference change at 6 hpi vs 1 hpi?
-res_int6  <- topTable(fit, coef = "tratamientovir:hour6",  
-                      number = Inf, adjust.method = "BH")
+# Filter significant genes
+sig <- res[res$adj.P.Val < 0.05 & abs(res$logFC) > 1, ]
 
-# 3. Interaction: does avr/vir difference change at 12 hpi vs 1 hpi?
-res_int12 <- topTable(fit, coef = "tratamientovir:hour12", 
-                      number = Inf, adjust.method = "BH")
-
-# --- Filter significant genes (adj.P < 0.05, |logFC| > 1) ---
-sig_overall <- res_overall[res_overall$adj.P.Val < 0.05 & abs(res_overall$logFC) > 1, ]
-sig_int6    <- res_int6[res_int6$adj.P.Val < 0.05 & abs(res_int6$logFC) > 1, ]
-sig_int12   <- res_int12[res_int12$adj.P.Val < 0.05 & abs(res_int12$logFC) > 1, ]
-
-# Quick summary
-cat("Overall DE genes:", nrow(sig_overall), "\n")
-cat("Interaction at 6 hpi:", nrow(sig_int6), "\n")
-cat("Interaction at 12 hpi:", nrow(sig_int12), "\n")
-
-# --- DIAGNOSIS ---
-
-# 1. How many genes pass BEFORE the logFC filter?
-sig_ponly <- res_overall[res_overall$adj.P.Val < 0.05, ]
-cat("Genes with adj.P < 0.05 (no logFC filter):", nrow(sig_ponly), "\n")
-
-# 2. What if you relax to raw p-value?
-sig_raw <- res_overall[res_overall$P.Value < 0.05, ]
-cat("Genes with raw P < 0.05:", nrow(sig_raw), "\n")
-
-# 3. What does the p-value distribution look like?
-hist(res_overall$P.Value, breaks = 50, 
-     main = "P-value distribution", xlab = "P-value",
-     col = "#7F77DD")
-# A good experiment shows enrichment near 0 (left spike)
-# A flat/uniform histogram = no signal or model problem
-
-# 4. Check your design matrix — does it look right?
-print(design)
-# You should see 18 rows, columns for tratamientovir, hour6, hour12, interactions
-
-# 5. Check sample sizes per group
-table(treatment_hours$tratamiento, treatment_hours$hour)
-
-# How many degrees of freedom does your model have?
-fit$df.residual
-# If you see values of 6 or less — that's your problem
+cat("Total DE genes:    ", nrow(sig), "\n")
+cat("Higher in vir:     ", nrow(sig[sig$logFC > 1, ]), "\n")
+cat("Higher in avr:     ", nrow(sig[sig$logFC < -1, ]), "\n")
 
