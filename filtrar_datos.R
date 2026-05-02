@@ -197,14 +197,161 @@ par(mfrow = c(1, 1))
 sig_raw <- res[res$P.Value < 0.05 & abs(res$logFC) > 1, ]
 cat("Genes con raw P < 0.05 y |logFC| > 1: ", nrow(sig_raw), "\n")
 
-# Ver cuántos tienen logFC > 1 en cada caso
-cat("\n--- Con adj.P < 0.1 ---\n")
-cat("Más altos en vir: ", nrow(sig_fdr10[sig_fdr10$logFC > 1,  ]), "\n")
-cat("Más altos en avr: ", nrow(sig_fdr10[sig_fdr10$logFC < -1, ]), "\n")
-
 cat("\n--- Con raw P < 0.05 y |logFC| > 1 ---\n")
 cat("Más altos en vir: ", nrow(sig_raw[sig_raw$logFC > 1,  ]), "\n")
 cat("Más altos en avr: ", nrow(sig_raw[sig_raw$logFC < -1, ]), "\n")
+
+#--------------------------------------------------
+# paso 4. VOLCANO PLOT 
+#--------------------------------------------------
+
+# Instalar
+#install.packages("ggrepel")
+#install.packages("caret")
+#install.packages("randomForest")
+
+library(ggrepel)
+library(caret)
+library(randomForest)
+
+res$significancia <- "No significativo"
+res$significancia[res$P.Value < 0.05 & res$logFC >  1] <- "Alto en vir"
+res$significancia[res$P.Value < 0.05 & res$logFC < -1] <- "Alto en avr"
+
+# Etiquetas para top 15 genes
+res$gen     <- rownames(res)
+top_labels  <- res[order(res$P.Value), ][1:15, ]
+
+ggplot(res, aes(x = logFC, y = -log10(P.Value), color = significancia)) +
+  geom_point(alpha = 0.6, size = 1.5) +
+  scale_color_manual(values = c(
+    "No significativo" = "grey70",
+    "Alto en vir"      = "#D85A30",
+    "Alto en avr"      = "#5DCAA5"
+  )) +
+  geom_vline(xintercept = c(-1, 1), linetype = "dashed", color = "grey40") +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "grey40") +
+  geom_text_repel(
+    data         = top_labels,
+    aes(label    = gen),
+    size         = 3,
+    color        = "black",
+    max.overlaps = 15
+  ) +
+  labs(
+    title = "Volcano plot — avr vs vir (controlado por hpi)",
+    x     = "log2 Fold Change (vir vs avr)",
+    y     = "-log10(P-value)",
+    color = NULL
+  ) +
+  theme_classic(base_size = 12)
+
+#--------------------------------------------------
+# paso 5. MODELO PREDICTIVO
+#--------------------------------------------------
+
+# Feature matrix: 185 genes DE (differencially expressed) como predictores
+de_genes <- rownames(sig_raw)
+X <- gene_set_log[, de_genes]
+y <- factor(treatment_hours$tratamiento, levels = c("avr", "vir"))
+
+cat("Dimensiones X:", nrow(X), "muestras x", ncol(X), "genes\n")
+cat("Labels y:", as.character(y), "\n")
+
+# LOOCV — única opción válida con n=12
+ctrl <- trainControl(
+  method          = "LOOCV",
+  classProbs      = TRUE,
+  summaryFunction = twoClassSummary,
+  savePredictions = TRUE
+)
+
+# --- Random Forest ---
+set.seed(42)
+rf_model <- train(
+  x         = X,
+  y         = y,
+  method    = "rf",
+  metric    = "ROC",
+  trControl = ctrl
+)
+
+# --- SVM ---
+set.seed(42)
+svm_model <- train(
+  x         = X,
+  y         = y,
+  method    = "svmRadial",
+  metric    = "ROC",
+  trControl = ctrl
+)
+
+# --- Lasso ---
+set.seed(42)
+lasso_model <- train(
+  x         = X,
+  y         = y,
+  method    = "glmnet",
+  metric    = "ROC",
+  trControl = ctrl,
+  tuneGrid  = expand.grid(
+    alpha  = 1,
+    lambda = seq(0.001, 0.1, length = 20)
+  )
+)
+
+#--------------------------------------------------
+# COMPARAR MODELOS
+#--------------------------------------------------
+resultados <- resamples(list(
+  RandomForest = rf_model,
+  SVM          = svm_model,
+  Lasso        = lasso_model
+))
+
+cat("\n=== COMPARACIÓN DE MODELOS ===\n")
+summary(resultados)
+
+# Visualizar comparación
+bwplot(resultados, metric = "ROC",
+       main = "Comparación de modelos — AUC-ROC (LOOCV)")
+
+#--------------------------------------------------
+# FEATURE IMPORTANCE — top genes predictivos
+#--------------------------------------------------
+importancia <- varImp(rf_model)$importance
+importancia$gen <- rownames(importancia)
+importancia <- importancia[order(importancia$Overall, decreasing = TRUE), ]
+
+cat("\n=== TOP 20 GENES MÁS PREDICTIVOS ===\n")
+print(head(importancia, 20))
+
+# Graficar top 20
+ggplot(head(importancia, 20),
+       aes(x = reorder(gen, Overall), y = Overall)) +
+  geom_col(fill = "#5DCAA5", alpha = 0.85) +
+  coord_flip() +
+  labs(
+    title = "Top 20 genes predictivos — Random Forest",
+    x     = NULL,
+    y     = "Importancia"
+  ) +
+  theme_classic(base_size = 12)
+
+#--------------------------------------------------
+# MÉTRICAS FINALES DEL MEJOR MODELO
+#--------------------------------------------------
+cat("\n=== MÉTRICAS RANDOM FOREST ===\n")
+cat("AUC-ROC:     ", max(rf_model$results$ROC), "\n")
+cat("Sensitivity: ", max(rf_model$results$Sens), "\n")
+cat("Specificity: ", max(rf_model$results$Spec), "\n")
+
+# Guardar resultados
+write.csv(importancia,       "feature_importance_RF.csv")
+write.csv(sig_raw,           "limma_DE_185genes.csv")
+write.csv(res,               "limma_todos_los_genes.csv")
+
+cat("\n¡Pipeline completo! Archivos guardados.\n")
 
 
 
