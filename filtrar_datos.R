@@ -387,3 +387,4 @@ ggplot(head(importancia, 20),
     y     = "Importancia"
   ) +
   theme_classic(base_size = 12)
+
