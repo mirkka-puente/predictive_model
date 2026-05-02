@@ -81,7 +81,7 @@ gene_set_filtered <- gene_set_filtered[, keep2]
 gene_set_log <- log2(gene_set_filtered + 1)
 
 #--------------------------------------------------
-# 4. Sanity check
+# 4. Chequeo
 #--------------------------------------------------
 cat("Muestras en expresión: ", nrow(gene_set_log), "\n")
 cat("Muestras en metadata:  ", nrow(treatment_hours), "\n")
@@ -151,4 +151,40 @@ pheatmap(
   legend_labels            = c("-2", "-1", "0", "1", "2\nRow Z-score"),
   fontsize_col             = 9,
   border_color             = NA,
-  main
+  main                     = "Top 500 genes variables — avr vs vir"
+)
+
+#==================================================
+# PASO 3 — LIMMA
+#==================================================
+treatment_factor <- factor(treatment_hours$tratamiento, levels = c("avr", "vir"))
+design <- model.matrix(~ treatment_factor)
+colnames(design) <- c("Intercept", "vir_vs_avr")
+
+# Fit con trend=TRUE (recomendado para FPKM log-transformado)
+fit <- lmFit(t(gene_set_log), design)
+fit <- eBayes(fit, trend = TRUE)
+
+# Resultados
+res <- topTable(fit, coef = "vir_vs_avr",
+                number = Inf, adjust.method = "BH")
+
+# Diagnóstico
+hist(res$P.Value, breaks = 50, col = "#5DCAA5",
+     main = "Distribución de p-valores (avr vs vir)",
+     xlab = "P-value")
+
+# Top 10 genes
+cat("\n=== TOP 10 GENES ===\n")
+print(head(res[order(res$P.Value),
+               c("logFC", "AveExpr", "P.Value", "adj.P.Val")], 10))
+
+# Filtrar genes DE
+sig <- res[res$adj.P.Val < 0.05 & abs(res$logFC) > 1, ]
+
+cat("\n=== RESULTADOS FINALES ===\n")
+cat("Genes DE totales: ", nrow(sig), "\n")
+cat("Más altos en vir: ", nrow(sig[sig$logFC > 1,  ]), "\n")
+cat("Más altos en avr: ", nrow(sig[sig$logFC < -1, ]), "\n")
+
+
