@@ -258,16 +258,16 @@ y <- factor(treatment_hours$tratamiento, levels = c("avr", "vir"))
 cat("Dimensiones X:", nrow(X), "muestras x", ncol(X), "genes\n")
 cat("Labels y:", as.character(y), "\n")
 
-# LOOCV — única opción válida con n=12
+# LOOCV 
 ctrl <- trainControl(
   method          = "LOOCV",
   classProbs      = TRUE,
   summaryFunction = twoClassSummary,
-  savePredictions = TRUE
+  savePredictions = "final"
 )
 
 # --- Random Forest ---
-set.seed(42)
+set.seed(29)
 rf_model <- train(
   x         = X,
   y         = y,
@@ -277,7 +277,7 @@ rf_model <- train(
 )
 
 # --- SVM ---
-set.seed(42)
+set.seed(29)
 svm_model <- train(
   x         = X,
   y         = y,
@@ -287,7 +287,7 @@ svm_model <- train(
 )
 
 # --- Lasso ---
-set.seed(42)
+set.seed(29)
 lasso_model <- train(
   x         = X,
   y         = y,
@@ -303,21 +303,72 @@ lasso_model <- train(
 #--------------------------------------------------
 # COMPARAR MODELOS
 #--------------------------------------------------
-resultados <- resamples(list(
-  RandomForest = rf_model,
-  SVM          = svm_model,
-  Lasso        = lasso_model
-))
 
-cat("\n=== COMPARACIÓN DE MODELOS ===\n")
-summary(resultados)
+# Extraer predicciones de cada modelo
+pred_rf    <- rf_model$pred
+pred_svm   <- svm_model$pred
+pred_lasso <- lasso_model$pred
 
-# Visualizar comparación
-bwplot(resultados, metric = "ROC",
-       main = "Comparación de modelos — AUC-ROC (LOOCV)")
+# Función para calcular métricas desde predicciones LOOCV
+get_metrics <- function(pred, model_name) {
+  # Tomar solo las predicciones del mejor tuning
+  if (!is.null(pred$mtry)) {
+    best <- rf_model$bestTune$mtry
+    pred <- pred[pred$mtry == best, ]
+  }
+  
+  cm  <- confusionMatrix(pred$pred, pred$obs, positive = "vir")
+  auc <- pROC::auc(pROC::roc(pred$obs, pred$vir, quiet = TRUE))
+  
+  data.frame(
+    Modelo      = model_name,
+    AUC_ROC     = round(as.numeric(auc), 3),
+    Accuracy    = round(cm$overall["Accuracy"], 3),
+    Sensitivity = round(cm$byClass["Sensitivity"], 3),
+    Specificity = round(cm$byClass["Specificity"], 3)
+  )
+}
+
+# Instalar pROC si no lo tienes
+# install.packages("pROC")
+library(pROC)
+
+# Calcular métricas para cada modelo
+metrics_rf    <- get_metrics(rf_model$pred,    "Random Forest")
+metrics_svm   <- get_metrics(svm_model$pred,   "SVM")
+metrics_lasso <- get_metrics(lasso_model$pred, "Lasso")
+
+# Tabla comparativa
+tabla_modelos <- rbind(metrics_rf, metrics_svm, metrics_lasso)
+rownames(tabla_modelos) <- NULL
+cat("\n=== COMPARACIÓN DE MODELOS (LOOCV) ===\n")
+print(tabla_modelos)
 
 #--------------------------------------------------
-# FEATURE IMPORTANCE — top genes predictivos
+# CURVAS ROC — las tres juntas
+#--------------------------------------------------
+roc_rf    <- roc(rf_model$pred$obs,    rf_model$pred$vir,    quiet = TRUE)
+roc_svm   <- roc(svm_model$pred$obs,   svm_model$pred$vir,   quiet = TRUE)
+roc_lasso <- roc(lasso_model$pred$obs, lasso_model$pred$vir, quiet = TRUE)
+
+# Plot
+plot(roc_rf,
+     col  = "#5DCAA5", lwd = 2,
+     main = "Curvas ROC — LOOCV (avr vs vir)")
+lines(roc_svm,   col = "#D85A30", lwd = 2)
+lines(roc_lasso, col = "#7F77DD", lwd = 2)
+abline(a = 0, b = 1, lty = 2, col = "grey60")
+legend("bottomleft",
+       legend = c(
+         paste0("Random Forest (AUC = ", round(auc(roc_rf),    2), ")"),
+         paste0("SVM           (AUC = ", round(auc(roc_svm),   2), ")"),
+         paste0("Lasso         (AUC = ", round(auc(roc_lasso), 2), ")")
+       ),
+       col = c("#5DCAA5", "#D85A30", "#7F77DD"),
+       lwd = 2, bty = "n")
+
+#--------------------------------------------------
+# FEATURE IMPORTANCE — top 20 genes (Random Forest)
 #--------------------------------------------------
 importancia <- varImp(rf_model)$importance
 importancia$gen <- rownames(importancia)
@@ -326,33 +377,13 @@ importancia <- importancia[order(importancia$Overall, decreasing = TRUE), ]
 cat("\n=== TOP 20 GENES MÁS PREDICTIVOS ===\n")
 print(head(importancia, 20))
 
-# Graficar top 20
 ggplot(head(importancia, 20),
        aes(x = reorder(gen, Overall), y = Overall)) +
   geom_col(fill = "#5DCAA5", alpha = 0.85) +
   coord_flip() +
   labs(
-    title = "Top 20 genes predictivos — Random Forest",
+    title = "Top 20 genes predictivos — Random Forest (LOOCV)",
     x     = NULL,
     y     = "Importancia"
   ) +
   theme_classic(base_size = 12)
-
-#--------------------------------------------------
-# MÉTRICAS FINALES DEL MEJOR MODELO
-#--------------------------------------------------
-cat("\n=== MÉTRICAS RANDOM FOREST ===\n")
-cat("AUC-ROC:     ", max(rf_model$results$ROC), "\n")
-cat("Sensitivity: ", max(rf_model$results$Sens), "\n")
-cat("Specificity: ", max(rf_model$results$Spec), "\n")
-
-# Guardar resultados
-write.csv(importancia,       "feature_importance_RF.csv")
-write.csv(sig_raw,           "limma_DE_185genes.csv")
-write.csv(res,               "limma_todos_los_genes.csv")
-
-cat("\n¡Pipeline completo! Archivos guardados.\n")
-
-
-
-
