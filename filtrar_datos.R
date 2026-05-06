@@ -329,7 +329,7 @@ get_metrics <- function(pred, model_name) {
   )
 }
 
-# Instalar pROC si no lo tienes
+# Instalar pROC 
 # install.packages("pROC")
 library(pROC)
 
@@ -345,7 +345,7 @@ cat("\n=== COMPARACIÓN DE MODELOS (LOOCV) ===\n")
 print(tabla_modelos)
 
 #--------------------------------------------------
-# CURVAS ROC — las tres juntas
+# CURVAS ROC
 #--------------------------------------------------
 roc_rf    <- roc(rf_model$pred$obs,    rf_model$pred$vir,    quiet = TRUE)
 roc_svm   <- roc(svm_model$pred$obs,   svm_model$pred$vir,   quiet = TRUE)
@@ -368,7 +368,7 @@ legend("bottomleft",
        lwd = 2, bty = "n")
 
 #--------------------------------------------------
-# FEATURE IMPORTANCE — top 20 genes (Random Forest)
+# top 20 genes (Random Forest)
 #--------------------------------------------------
 importancia <- varImp(rf_model)$importance
 importancia$gen <- rownames(importancia)
@@ -389,71 +389,4 @@ ggplot(head(importancia, 20),
   theme_classic(base_size = 12)
 
 #--------------------------------------------------
-# VALIDACIÓN EXTERNA — GSE56094
-# Descargar desde GEO y aplicar tu modelo RF
-#--------------------------------------------------
-
-# Instalar GEOquery si no lo tienes
-BiocManager::install("GEOquery")
-library(GEOquery)
-
-#--------------------------------------------------
-# PASO 1: Descargar GSE56094
-#--------------------------------------------------
-gse <- getGEO("GSE56094", GSEMatrix = TRUE)
-expr_geo  <- exprs(gse[[1]])       # matriz de expresión
-meta_geo  <- pData(gse[[1]])       # metadata
-
-# Ver estructura
-cat("Genes (probes):", nrow(expr_geo), "\n")
-cat("Muestras:      ", ncol(expr_geo), "\n")
-
-# Ver columnas de metadata disponibles
-cat("\nColumnas de metadata:\n")
-print(colnames(meta_geo))
-
-#--------------------------------------------------
-# Preparar dataset externo
-#--------------------------------------------------
-
-#--------------------------------------------------
-# FILTRAR: solo hpi 1, 6, 12 — avr y vir
-# Para que sea comparable con el dataset previo
-#--------------------------------------------------
-
-# Identificar muestras
-es_avr  <- meta_geo$`treatment:ch1` == "Infected P. syringae pv tomato DC3000 hrpA- mutant"
-es_vir  <- meta_geo$`treatment:ch1` == "Infected P. syringae pv tomato DC3000 wildtype"
-es_hpi  <- meta_geo$`hours_since_infection:ch1` %in% c("1", "6", "12")
-
-cat("Muestras avr totales:", sum(es_avr), "\n")
-cat("Muestras vir totales:", sum(es_vir), "\n")
-cat("Muestras en hpi 1/6/12:", sum(es_hpi), "\n")
-
-# Filtrar avr + vir + hpi 1,6,12
-idx_ext  <- which((es_avr | es_vir) & es_hpi)
-cat("Muestras finales para validación:", length(idx_ext), "\n")
-
-expr_sub  <- expr_geo[, idx_ext]
-meta_sub  <- meta_geo[idx_ext, ]
-label_ext <- factor(
-  ifelse(meta_sub$`treatment:ch1` == 
-           "Infected P. syringae pv tomato DC3000 hrpA- mutant", 
-         "avr", "vir"),
-  levels = c("avr", "vir")
-)
-
-cat("\nDistribución final:\n")
-print(table(label_ext, meta_sub$`hours_since_infection:ch1`))
-
-#--------------------------------------------------
-# MAPEAR probe IDs → AGI codes
-#--------------------------------------------------
-plataforma  <- getGEO("GPL10840")
-probe_tabla <- Table(plataforma)
-
-cat("\nColumnas de la plataforma:\n")
-print(colnames(probe_tabla))
-print(head(probe_tabla, 3))
-
-
+# VALIDACIÓN EXTERNA??
